@@ -50,6 +50,7 @@ h1{margin:0 0 10px;font-size:27px;line-height:1.3;letter-spacing:-.01em;font-wei
 .btn:hover{border-color:var(--ink-3);color:var(--ink)}
 .btn[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
 @media (prefers-color-scheme:dark){.btn[aria-pressed="true"]{color:#0d1512}}
+.mobile-nav{display:none}
 
 .sec{margin:44px 0 0}
 .sec-h{display:flex;align-items:baseline;gap:11px;padding-bottom:11px;border-bottom:1px solid var(--line)}
@@ -120,12 +121,19 @@ footer p{margin:0 0 7px}
 
 @media(max-width:600px){
   header{padding:36px 0 22px} h1{font-size:23px}
-  .bar-in{gap:8px;flex-wrap:nowrap}
+  .wrap{padding-bottom:84px}
+  .bar-in{gap:8px;flex-wrap:wrap}
   .track{min-width:48px}
   .stat{font-size:11.5px}
   .btn{padding:4px 9px;font-size:11.5px}
   .q{padding:16px 15px;border-radius:10px} .q-s{font-size:15.5px}
   .opt{font-size:14px;padding:10px 12px}
+  .mobile-nav{position:fixed;z-index:30;left:0;right:0;bottom:0;display:flex;align-items:center;
+    gap:10px;padding:10px 16px calc(10px + env(safe-area-inset-bottom));background:color-mix(in srgb,var(--bg) 92%,transparent);
+    backdrop-filter:blur(12px);border-top:1px solid var(--line)}
+  .mobile-nav button{flex:1;min-height:42px;font-size:14px}
+  .mobile-pos{min-width:62px;text-align:center;font-size:12.5px;color:var(--ink-2);font-variant-numeric:tabular-nums}
+  .mobile-nav button:disabled{opacity:.4;cursor:default}
 }
 </style>
 </head>
@@ -143,11 +151,18 @@ footer p{margin:0 0 7px}
     <div class="track"><div class="fill" id="fill"></div></div>
     <div class="stat" id="stat"><b>0</b>/100 · 对 <b>0</b></div>
     <button class="btn" id="wrongBtn" aria-pressed="false">只看错题</button>
+    <button class="btn" id="shuffleBtn">乱序出题</button>
     <button class="btn" id="resetBtn">重来</button>
   </div>
 </div>
 
 <main id="main"></main>
+
+<nav class="mobile-nav" aria-label="题目切换">
+  <button class="btn" id="prevBtn" type="button">← 上一题</button>
+  <div class="mobile-pos" id="mobilePos"></div>
+  <button class="btn" id="nextBtn" type="button">下一题 →</button>
+</nav>
 
 <div class="done hidden" id="done">
   <h2>100 题做完了</h2>
@@ -178,31 +193,70 @@ const stat = document.getElementById("stat");
 const done = document.getElementById("done");
 const doneText = document.getElementById("doneText");
 const wrongBtn = document.getElementById("wrongBtn");
+const shuffleBtn = document.getElementById("shuffleBtn");
+const prevBtn = document.getElementById("prevBtn");
+const nextBtn = document.getElementById("nextBtn");
+const mobilePos = document.getElementById("mobilePos");
 let onlyWrong = false;
+let questionOrder = QUESTIONS.map(q => q.id);
+let currentId = questionOrder[0];
+
+function isMobile(){ return window.matchMedia("(max-width: 600px)").matches; }
+function viewQuestions(){
+  const byId = Object.fromEntries(QUESTIONS.map(q => [q.id, q]));
+  return questionOrder.map(id => byId[id])
+    .filter(q => !onlyWrong || (state[q.id] && state[q.id] !== q.answer));
+}
+function keepCurrent(qs){
+  if (qs.length && !qs.some(q => q.id === currentId)) currentId = qs[0].id;
+}
 
 function render(){
   main.innerHTML = "";
-  SECTIONS.forEach(sec => {
-    const qs = QUESTIONS.filter(q => q.section === sec.id)
-      .filter(q => !onlyWrong || (state[q.id] && state[q.id] !== q.answer));
-    if (!qs.length) return;
+  const visible = viewQuestions();
+  keepCurrent(visible);
+  if (isMobile() && visible.length){
+    main.appendChild(card(visible.find(q => q.id === currentId)));
+  } else {
+    SECTIONS.forEach(sec => {
+      const qs = visible.filter(q => q.section === sec.id);
+      if (!qs.length) return;
 
-    const wrap = document.createElement("section");
-    wrap.className = "sec";
-    const h = document.createElement("div");
-    h.className = "sec-h";
-    h.innerHTML = '<div class="sec-id">' + sec.id + '</div>'
-      + '<h2 class="sec-t">' + sec.title + '</h2>'
-      + '<div class="sec-n">' + qs.length + ' 题</div>';
-    wrap.appendChild(h);
-    qs.forEach(q => wrap.appendChild(card(q)));
-    main.appendChild(wrap);
-  });
+      const wrap = document.createElement("section");
+      wrap.className = "sec";
+      const h = document.createElement("div");
+      h.className = "sec-h";
+      h.innerHTML = '<div class="sec-id">' + sec.id + '</div>'
+        + '<h2 class="sec-t">' + sec.title + '</h2>'
+        + '<div class="sec-n">' + qs.length + ' 题</div>';
+      wrap.appendChild(h);
+      qs.forEach(q => wrap.appendChild(card(q)));
+      main.appendChild(wrap);
+    });
+  }
   if (onlyWrong && !main.children.length){
     main.innerHTML = '<section class="sec"><p style="color:var(--ink-3);padding:28px 0">'
       + (Object.keys(state).length ? '没有错题。' : '还没开始答题。') + '</p></section>';
   }
   tally();
+  updateMobileNav(visible);
+}
+
+function updateMobileNav(qs){
+  const i = qs.findIndex(q => q.id === currentId);
+  mobilePos.textContent = i < 0 ? "" : (i + 1) + " / " + qs.length;
+  prevBtn.disabled = i <= 0;
+  nextBtn.disabled = i < 0 || i >= qs.length - 1;
+}
+function moveQuestion(step){
+  const qs = viewQuestions();
+  keepCurrent(qs);
+  const i = qs.findIndex(q => q.id === currentId);
+  if (qs[i + step]){
+    currentId = qs[i + step].id;
+    render();
+    window.scrollTo({top:0, behavior:"smooth"});
+  }
 }
 
 function card(q){
@@ -283,6 +337,26 @@ wrongBtn.addEventListener("click", () => {
   render();
   window.scrollTo({top:0, behavior:"smooth"});
 });
+shuffleBtn.addEventListener("click", () => {
+  for (let i = questionOrder.length - 1; i > 0; i--){
+    const j = Math.floor(Math.random() * (i + 1));
+    [questionOrder[i], questionOrder[j]] = [questionOrder[j], questionOrder[i]];
+  }
+  currentId = questionOrder[0];
+  render();
+  window.scrollTo({top:0, behavior:"smooth"});
+});
+prevBtn.addEventListener("click", () => moveQuestion(-1));
+nextBtn.addEventListener("click", () => moveQuestion(1));
+let touchStartX = null;
+main.addEventListener("touchstart", e => { touchStartX = e.changedTouches[0].clientX; }, {passive:true});
+main.addEventListener("touchend", e => {
+  if (touchStartX === null || !isMobile()) return;
+  const delta = e.changedTouches[0].clientX - touchStartX;
+  touchStartX = null;
+  if (Math.abs(delta) >= 60) moveQuestion(delta < 0 ? 1 : -1);
+}, {passive:true});
+window.addEventListener("resize", render);
 document.getElementById("resetBtn").addEventListener("click", () => {
   if (!confirm("清空所有作答记录？")) return;
   state = {}; save(); onlyWrong = false;
